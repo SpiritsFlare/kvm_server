@@ -1,0 +1,174 @@
+# Server (Raspberry Pi) - save as server.py
+import zmq
+import base64
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from threading import Thread
+import json
+import cv2
+import numpy as np
+import os
+import matplotlib.pyplot as plt
+
+class ImageHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        content_length = int(self.headers['Content-Length'])
+        post_data = self.rfile.read(content_length)
+        
+        try:
+            # Decode the image data
+            image_data = json.loads(post_data.decode('utf-8'))
+            image_bytes = base64.b64decode(image_data['image'])
+            
+            # Save the image
+            with open(f"received_image_{image_data.get('timestamp', 'unknown')}.jpg", 'wb') as f:
+                f.write(image_bytes)
+            
+            # Send success response
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'status': 'success'}).encode())
+            
+        except Exception as e:
+            # Send error response
+            self.send_response(400)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode())
+
+def run_server(port=8080):
+    server_address = ('', port)
+    httpd = HTTPServer(server_address, ImageHandler)
+    print(f"Server running on port {port}")
+    httpd.serve_forever()
+
+if __name__ == '__main__':
+    # Start the HTTP server in a separate thread
+    server_thread = Thread(target=run_server)
+    server_thread.daemon = True
+    server_thread.start()
+    
+    # Setup ZMQ context and socket
+    context = zmq.Context()
+    socket = context.socket(zmq.REP)
+    socket.bind("tcp://*:5555")
+    
+    print("ZMQ server is ready to receive images...")
+
+    def decode_and_save_recieved_image(base64_string, output_path = "image_from_base64.jpg"):
+        image_arr = np.frombuffer(image_bytes, np.uint8)
+        img  = cv2.imdecode(image_arr, cv2.IMREAD_COLOR)
+
+        if img is not None:
+            cv2.imwrite(output_path, img)
+            print(f"Image saved to {output_path}")
+            abs_path = os.path.abspath(output_path)
+            return img, abs_path
+        
+    def fluorescence_cal(img, roi=None, save_path="fluorescence_analysis.jpg"):
+        if len(img.shape) ==3:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = img
+
+        cv2.imwrite("grayscale_img.jpg", gray)
+        print(f"Gray img save to {os.path.abspath('grayscale_img.jpg')}")
+        if roi:
+            x,y,w,h = roi
+            gray_roi = gray[y:y+h, X:x+w]
+        else:
+            gray_roi = gray
+
+        mean_intensity = np.mean(gray_roi)
+        max_intensity = mp.max(gray_roi)
+        min_intesity = np(min(gra))
+        stdev = np.std(gray_roi)
+
+        hist = cv2.calcHist([gray_roi], [0], None, [256], [0,256])
+
+        integrated_desnity = np.sum(gray_roi)
+
+        area_pixels = gray_roi.size
+
+        rfu_mean = mean_intensity
+        rfu_integrated = integrated_density / area_pixels if area_pixels > 0 else 0
+        
+        # Background correction (using lowest 5% of pixels as background)
+        sorted_pixels = np.sort(gray_roi.flatten())
+        background = np.mean(sorted_pixels[:int(len(sorted_pixels) * 0.05)])
+        rfu_background_corrected = mean_intensity - background
+        
+        # Create visualization (for transferring back to PC)
+        # This is a headless version for SSH
+        plt.figure(figsize=(12, 8))
+        
+        # Original grayscale image
+        plt.subplot(221)
+        plt.imshow(gray_roi, cmap='gray')
+        plt.title('Grayscale Image')
+        plt.colorbar(label='Intensity')
+        
+        # Histogram
+        plt.subplot(222)
+        plt.plot(hist)
+        plt.title('Intensity Histogram')
+        plt.xlabel('Pixel Value (0-255)')
+        plt.ylabel('Frequency')
+        
+        # Heatmap visualization
+        plt.subplot(223)
+        plt.imshow(gray_roi, cmap='hot')
+        plt.title('Intensity Heatmap')
+        plt.colorbar(label='Intensity')
+        
+        # Data table
+        plt.subplot(224)
+        plt.axis('off')
+        data_text = f"Fluorescence Analysis:\n\n" \
+                    f"Mean Intensity: {mean_intensity:.2f}\n" \
+                    f"Max Intensity: {max_intensity}\n" \
+                    f"Min Intensity: {min_intensity}\n" \
+                    f"Standard Deviation: {std_dev:.2f}\n" \
+                    f"Integrated Density: {integrated_density}\n" \
+                    f"Area (pixels): {area_pixels}\n\n" \
+                    f"RFU (Mean): {rfu_mean:.2f}\n" \
+                    f"RFU (Integrated): {rfu_integrated:.2f}\n" \
+                    f"RFU (Background Corrected): {rfu_background_corrected:.2f}"
+        plt.text(0, 0.5, data_text, fontsize=9)
+        
+        plt.tight_layout()
+        plt.savefig(save_path)
+        print(f"Fluorescence analysis saved to {os.path.abspath(save_path)}")
+        
+        # Return the fluorescence data
+        return {
+            "mean_intensity": mean_intensity,
+            "max_intensity": max_intensity,
+            "min_intensity": min_intensity,
+            "std_dev": std_dev,
+            "integrated_density": integrated_density,
+            "area_pixels": area_pixels,
+            "rfu_mean": rfu_mean,
+            "rfu_integrated": rfu_integrated,
+            "rfu_background_corrected": rfu_background_corrected,
+            "background": background,
+            "histogram": hist.flatten().tolist()
+        }
+    
+    while True:
+        try:
+            # Receive image data through ZMQ
+            message = socket.recv_json()
+            
+            # Save the image
+            image_bytes = base64.b64decode(message['image'])
+            with open(f"zmq_image_{message.get('timestamp', 'unknown')}.jpg", 'wb') as f:
+                f.write(image_bytes)
+            
+            
+            # Send acknowledgment
+            socket.send_json({"status": "success"})
+            
+        except Exception as e:
+            print(f"Error processing image: {e}")
+            socket.send_json({"status": "error", "message": str(e)})
