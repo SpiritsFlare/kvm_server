@@ -6,10 +6,10 @@
 #include <ArduinoJson.h>
 
 // Configuration
-#define WIFI_SSID "Brian's Galaxy A52"
-#define WIFI_PASSWORD "yjro0106"
-#define SERVER_IP "http://127.0.0.1:4040"
-#define SERVER_PORT 80
+#define WIFI_SSID "x"
+#define WIFI_PASSWORD "y"
+#define SERVER_IP "z"
+#define SERVER_PORT "v"
 
 WiFiClient client;
 
